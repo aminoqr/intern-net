@@ -85,7 +85,8 @@ def _throttle() -> None:
 def send_message(text: str, chat_id: Optional[str] = None) -> None:
     """Deliver one message, or print it if Telegram is not configured."""
     if not is_configured():
-        print("--- telegram (dry run) ---")
+        target = f", chat {chat_id}" if chat_id else ""
+        print(f"--- telegram (dry run{target}) ---")
         print(text)
         print("--- end ---")
         return
@@ -149,9 +150,23 @@ def format_job(job: Job) -> str:
     return "\n".join(parts)
 
 
+def _chat_for(job: Job) -> Optional[str]:
+    """The chat this job's category routes to, or None for the main chat.
+
+    Categories map to env vars in config.CATEGORY_CHAT_ENV. An unset var means
+    that category has no channel of its own and falls back to the main chat,
+    so the split is opt-in per category and nothing is ever silently dropped.
+    """
+    env_name = config.CATEGORY_CHAT_ENV.get(category(job))
+    if not env_name:
+        return None
+    load_env()
+    return os.environ.get(env_name) or None
+
+
 def notify_job(job: Job) -> None:
-    """Send one job as its own message."""
-    send_message(format_job(job))
+    """Send one job as its own message, to its category's chat."""
+    send_message(format_job(job), chat_id=_chat_for(job))
 
 
 def notify_problems(problems: dict[str, str]) -> int:

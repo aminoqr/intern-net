@@ -67,6 +67,23 @@ python main.py --dry-run  # now reports 0 new
 `.env` is gitignored. Without it the bot runs in dry-run mode and prints to the console, so
 the pipeline stays testable before the bot exists.
 
+### Optional: separate channels per category
+
+Every match is classified as either an **internship** (intern, trainee, working student,
+graduate program, staż, praktyki) or a **junior** role, and each category can go to its own
+channel:
+
+1. Create a Telegram channel (or group), and add your bot to it as an administrator with
+   permission to post.
+2. Post any message in the channel, then open `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   and copy `channel_post.chat.id` — a negative number like `-1001234567890`.
+3. Set `TELEGRAM_CHAT_ID_INTERNSHIPS` and/or `TELEGRAM_CHAT_ID_JUNIOR` (in `.env` locally, as
+   Actions secrets on GitHub) to those ids.
+
+Both are optional and independent: any category without its own id falls back to the main
+`TELEGRAM_CHAT_ID`, so with no extra setup everything arrives in one chat. Source-health
+alerts always go to the main chat.
+
 ### Running it on GitHub Actions
 
 1. Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` under Settings, Secrets and variables,
@@ -84,12 +101,33 @@ repo, because an Actions runner's filesystem does not survive between scheduled 
 fetchers/*  ->  filter.py  ->  dedupe.py  ->  notify.py
   8 sources     3 gates       2 layers      Telegram
 
-  1450 fetched -> 187 matched -> 137 new -> 11 messages
+  1450 fetched -> 188 matched -> new ones -> one message per job
 ```
 
-Every fetcher returns the same normalized `Job` record, so `main.py` never knows where a
-posting came from. A representative run: 1450 postings fetched across eight sources, 187 pass
-the filters, 137 are new after deduplication, delivered as 11 batched messages.
+Every fetcher returns the same normalized `Job` record — including a structured work mode
+(remote / hybrid / onsite) read from each source's own data — so `main.py` never knows where
+a posting came from. A representative run fetches ~1450 postings across eight sources, of
+which ~188 pass the filters; whatever survives deduplication is sent.
+
+### Notifications
+
+Each new job is its own Telegram message, tagged with its category, work mode and city:
+
+> [Junior .NET Developer (f/m)](#)
+> **Netcompany Poland**
+> Warsaw · Junior
+> \#junior \#hybrid \#warsaw · *pracujpl*
+
+The hashtags are the filtering UI. Tapping `#internship`, `#remote` or `#warszawa` in
+Telegram shows only the messages carrying that tag — no bot server, no commands. One message
+per job also means each posting can be forwarded or replied to on its own, so replying
+"applied" to a message is a perfectly good application tracker. Jobs are marked as seen one
+by one right after their message is delivered, so a failure mid-run retries only what was
+never sent.
+
+Internships and junior roles can be routed to separate channels — see the setup section
+above. The category and the job's location, seniority and work mode are also stored in
+`seen_jobs.db`, so the committed database doubles as a queryable history of every match.
 
 ### Filtering
 
@@ -151,7 +189,7 @@ models.py                   the normalized Job record and text normalization
 filter.py                   keyword, seniority and location gates
 dedupe.py                   SQLite store, both dedup layers, source statistics
 health.py                   fail-loud source health verdicts
-notify.py                   Telegram delivery, batching, dry-run mode
+notify.py                   Telegram delivery: per-job messages, hashtags, channel routing
 main.py                     fetch -> filter -> dedupe -> notify
 fetchers/base.py            shared HTTP with browser headers and retries
 fetchers/nofluffjobs.py     public JSON search API

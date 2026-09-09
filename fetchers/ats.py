@@ -50,8 +50,9 @@ def _greenhouse(job: dict, company: str, source: str) -> Job:
 
 def _ashby(job: dict, company: str, source: str) -> Job:
     locations = [job.get("location")] + list(job.get("secondaryLocations") or [])
-    if job.get("isRemote") or job.get("workplaceType") == "Remote":
-        locations.append("Remote")
+    work_mode = (job.get("workplaceType") or "").lower()  # Remote/Hybrid/Onsite
+    if job.get("isRemote") and work_mode != "remote":
+        work_mode = f"{work_mode}, remote" if work_mode else "remote"
     return Job(
         id=f"{source}:{job.get('id')}",
         title=(job.get("title") or "").strip(),
@@ -62,14 +63,16 @@ def _ashby(job: dict, company: str, source: str) -> Job:
         url=job.get("jobUrl") or job.get("applyUrl") or "",
         source=source,
         posted_at=job.get("publishedAt"),
+        work_mode=work_mode,
     )
+
+
+LEVER_WORK_MODES = {"remote": "remote", "hybrid": "hybrid", "on-site": "onsite", "onsite": "onsite"}
 
 
 def _lever(job: dict, company: str, source: str) -> Job:
     categories = job.get("categories") or {}
     locations = list(categories.get("allLocations") or [categories.get("location")])
-    if job.get("workplaceType") == "remote":
-        locations.append("Remote")
     return Job(
         id=f"{source}:{job.get('id')}",
         title=(job.get("text") or "").strip(),
@@ -79,6 +82,7 @@ def _lever(job: dict, company: str, source: str) -> Job:
         url=job.get("hostedUrl") or job.get("applyUrl") or "",
         source=source,
         posted_at=iso_from_epoch_ms(job.get("createdAt")),
+        work_mode=LEVER_WORK_MODES.get((job.get("workplaceType") or "").lower(), ""),
     )
 
 

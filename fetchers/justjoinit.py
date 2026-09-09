@@ -86,12 +86,20 @@ def _ld_json_count(html: str) -> int:
     return 0
 
 
+WORK_MODE_MAP = {
+    "remote": "remote",
+    "hybrid": "hybrid",
+    "partly_remote": "hybrid",
+    "office": "onsite",
+}
+
+
 def _to_jobs(record: dict) -> list[Job]:
     title = (record.get("title") or record.get("body") or "").strip()
     company = (record.get("companyName") or "").strip()
     seniority = record.get("experienceLevel") or ""
     posted_at = record.get("publishedAt") or record.get("lastPublishedAt")
-    is_remote = record.get("workplaceType") == "remote"
+    work_mode = WORK_MODE_MAP.get((record.get("workplaceType") or "").lower(), "")
 
     # multilocation carries one slug per city; fall back to the top-level pair.
     places = record.get("multilocation") or [
@@ -104,8 +112,6 @@ def _to_jobs(record: dict) -> list[Job]:
         if not slug:
             continue
         location = (place.get("city") or record.get("city") or "").strip()
-        if is_remote and location:
-            location = f"{location}, Remote"
         jobs.append(
             Job(
                 id=f"{SOURCE}:{slug}",
@@ -116,6 +122,7 @@ def _to_jobs(record: dict) -> list[Job]:
                 url=JOB_URL_TEMPLATE.format(slug=slug),
                 source=SOURCE,
                 posted_at=posted_at,
+                work_mode=work_mode,
             )
         )
     return jobs

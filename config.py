@@ -72,6 +72,24 @@ ENTRY_LEVEL_KEYWORDS = [
     "absolwen*",  # absolwent (= graduate)
 ]
 
+# Subset of the entry-level vocabulary that means "not a regular employment
+# contract": internships, traineeships, working-student and graduate programs.
+# Used to pick which Telegram channel a match is routed to, not to filter.
+INTERNSHIP_KEYWORDS = [
+    "intern",
+    "internship",
+    "interns",
+    "trainee",
+    "trainees",
+    "apprentice",
+    "apprenticeship",
+    "working student",
+    "graduate",
+    "praktyk*",
+    "staz*",
+    "absolwen*",
+]
+
 # Titles containing these are rejected even if they also match an entry-level
 # keyword. Catches "Senior Engineer (Junior team)" and, more commonly,
 # "Junior/Mid/Senior" range postings that are really mid-level asks.
@@ -357,6 +375,23 @@ JUSTJOINIT_SEARCH_URLS = [
     "https://justjoin.it/job-offers/warszawa?keyword=junior",
     "https://justjoin.it/job-offers/warszawa?keyword=intern",
 ]
+
+
+# --- Telegram routing ----------------------------------------------------
+#
+# Every match lands in exactly one category. Each category can have its own
+# chat -- point the env var at a channel/group id -- and any category whose
+# env var is unset falls back to TELEGRAM_CHAT_ID, so with no extra setup
+# everything still arrives in the main chat. Alerts always go to the main chat.
+
+CATEGORY_CHAT_ENV = {
+    "internship": "TELEGRAM_CHAT_ID_INTERNSHIPS",
+    "junior": "TELEGRAM_CHAT_ID_JUNIOR",
+}
+
+# Telegram allows ~1 msg/sec sustained per chat; with one message per job this
+# pause keeps a big run (e.g. after reseeding) from tripping 429s.
+TELEGRAM_SEND_INTERVAL = 1.0
 
 
 # --- Runtime -------------------------------------------------------------

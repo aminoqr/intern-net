@@ -48,6 +48,7 @@ SENIORITY_BAD = _compile_all(config.REJECTED_SENIORITY)
 POLISH = _compile_all(config.POLISH_LOCATIONS)
 REMOTE = _compile_all(config.REMOTE_LOCATIONS)
 FOREIGN = _compile_all(config.REJECTED_LOCATIONS)
+INTERNSHIP = _compile_all(config.INTERNSHIP_KEYWORDS)
 
 # Snowflake and other large ATS boards prefix locations with a country code,
 # e.g. "US-CA-Menlo Park" or "PL-Warsaw-Lixa C". Anything that is not PL is
@@ -85,6 +86,7 @@ def rejection_reason(job: Job) -> Optional[str]:
     title = normalize_text(job.title)
     seniority = normalize_text(job.seniority)
     location = normalize_text(job.location)
+    is_remote = "remote" in normalize_text(job.work_mode)
 
     # 1. Role gate.
     if not _hit(ROLE, title):
@@ -116,8 +118,9 @@ def rejection_reason(job: Job) -> Optional[str]:
         # the boards, so the title has the final say when it says otherwise.
         return f"seniority: title says {mid_marker!r} with no entry-level marker"
 
-    # 3. Location gate.
-    if not location:
+    # 3. Location gate. Remoteness comes from the structured work_mode field
+    #    when a source provides one, and from the location text otherwise.
+    if not location and not is_remote:
         return None if config.ALLOW_UNKNOWN_LOCATION else "location: unknown"
 
     in_poland = _hit(POLISH, location)
@@ -125,7 +128,7 @@ def rejection_reason(job: Job) -> Optional[str]:
     if foreign and not in_poland:
         # Remote does not rescue this: "Vilnius, Remote" is a Lithuanian role.
         return f"location: {job.location!r} is outside Poland ({foreign!r})"
-    if not (in_poland or _hit(REMOTE, location)):
+    if not (in_poland or is_remote or _hit(REMOTE, location)):
         return f"location: {job.location!r} out of scope"
 
     return None
@@ -133,6 +136,17 @@ def rejection_reason(job: Job) -> Optional[str]:
 
 def matches(job: Job) -> bool:
     return rejection_reason(job) is None
+
+
+def category(job: Job) -> str:
+    """Which stream a matched job belongs to: "internship" or "junior".
+
+    Internship covers traineeships, working-student and graduate programs --
+    anything that is not a regular employment contract. Everything else that
+    survived the filter is by definition a junior role.
+    """
+    text = normalize_text(f"{job.title} {job.seniority}")
+    return "internship" if _hit(INTERNSHIP, text) else "junior"
 
 
 def filter_jobs(jobs: list[Job]) -> list[Job]:

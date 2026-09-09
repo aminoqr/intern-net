@@ -30,9 +30,16 @@ def _location(posting: dict) -> str:
         # places[] is padded with entries that carry a province but no city.
         if city and city not in cities:
             cities.append(city)
-    if posting.get("fullyRemote") and "Remote" not in cities:
-        cities.append("Remote")
-    return ", ".join(cities)
+    # "Remote" also shows up as a pseudo-city in places[]; keep it out of the
+    # location string now that remoteness is a first-class field.
+    return ", ".join(city for city in cities if city.lower() != "remote")
+
+
+def _is_remote(posting: dict) -> bool:
+    if posting.get("fullyRemote"):
+        return True
+    places = posting.get("location", {}).get("places") or []
+    return any((place.get("city") or "").lower() == "remote" for place in places)
 
 
 def _to_job(posting: dict) -> Job:
@@ -47,6 +54,8 @@ def _to_job(posting: dict) -> Job:
         url=JOB_URL_TEMPLATE.format(slug=slug),
         source=SOURCE,
         posted_at=iso_from_epoch_ms(posting.get("posted")),
+        # NFJ only exposes a remote flag; hybrid vs onsite is not distinguishable.
+        work_mode="remote" if _is_remote(posting) else "",
     )
 
 

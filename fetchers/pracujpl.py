@@ -68,37 +68,53 @@ def _seniority(group: dict) -> str:
     return ", ".join(level for level in levels if level)
 
 
+WORK_MODE_MAP = {
+    "praca zdalna": "remote",
+    "praca hybrydowa": "hybrid",
+    "praca stacjonarna": "onsite",
+    "praca mobilna": "onsite",
+}
+
+
+def _work_mode(group: dict) -> str:
+    modes = []
+    for raw in group.get("workModes") or []:
+        mode = WORK_MODE_MAP.get((raw or "").strip().lower())
+        if mode and mode not in modes:
+            modes.append(mode)
+    if group.get("isRemoteWorkAllowed") and "remote" not in modes:
+        modes.append("remote")
+    return ", ".join(modes)
+
+
 def _to_jobs(group: dict) -> list[Job]:
     """One Job per advertised city."""
     title = (group.get("jobTitle") or "").strip()
     company = (group.get("companyName") or "").strip()
     seniority = _seniority(group)
     posted_at = group.get("initialPublicated")
-    remote_allowed = bool(group.get("isRemoteWorkAllowed")) or "Praca zdalna" in (
-        group.get("workModes") or []
-    )
+    work_mode = _work_mode(group)
 
     jobs = []
     for offer in group.get("offers") or []:
         url = offer.get("offerAbsoluteUri")
         if not url:
             continue
-        location = (offer.get("displayWorkplace") or "").strip()
-        # isWholePoland is deliberately ignored: it is set even on plainly
-        # on-site, per-city postings, so treating it as nationwide would append
-        # "Poland" to every city and defeat the location filter entirely.
-        if remote_allowed and location:
-            location = f"{location}, Remote"
+        # displayWorkplace is kept as-is. isWholePoland is deliberately
+        # ignored: it is set even on plainly on-site, per-city postings, so
+        # treating it as nationwide would append "Poland" to every city and
+        # defeat the location filter entirely. Remoteness lives in work_mode.
         jobs.append(
             Job(
                 id=f"{SOURCE}:{offer.get('partitionId') or group.get('groupId')}",
                 title=title,
                 company=company,
-                location=location,
+                location=(offer.get("displayWorkplace") or "").strip(),
                 seniority=seniority,
                 url=url,
                 source=SOURCE,
                 posted_at=posted_at,
+                work_mode=work_mode,
             )
         )
     return jobs

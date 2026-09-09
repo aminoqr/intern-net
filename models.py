@@ -25,6 +25,10 @@ class Job:
     url: str
     source: str  # e.g. "nofluffjobs", "greenhouse:point72", "ashby:nord-security"
     posted_at: Optional[str] = None  # ISO 8601 where the source provides it
+    # "remote", "hybrid", "onsite", a comma-joined mix, or "" when the source
+    # does not say. Kept separate from location so "Wroclaw" + remote is
+    # distinguishable from an onsite Wroclaw role.
+    work_mode: str = ""
 
     def __str__(self) -> str:
         return f"{self.title} @ {self.company} ({self.location}) [{self.source}]"

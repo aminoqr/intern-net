@@ -34,7 +34,10 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
     title         TEXT NOT NULL,
     company       TEXT NOT NULL,
     source        TEXT NOT NULL,
-    first_seen_at TEXT NOT NULL
+    first_seen_at TEXT NOT NULL,
+    location      TEXT NOT NULL DEFAULT '',
+    seniority     TEXT NOT NULL DEFAULT '',
+    work_mode     TEXT NOT NULL DEFAULT ''
 );
 
 -- Per-run result counts, kept so the fail-loud check has a baseline to compare
@@ -114,6 +117,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             "UPDATE seen_jobs SET fingerprint = ? WHERE url = ?", backfill
         )
 
+    # Descriptive columns added later; rows from before the migration keep ''
+    # (the raw postings are gone, so there is nothing to backfill them from).
+    for column in ("location", "seniority", "work_mode"):
+        if column not in columns:
+            conn.execute(
+                f"ALTER TABLE seen_jobs ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_seen_jobs_fingerprint "
         "ON seen_jobs(fingerprint)"
@@ -158,15 +169,27 @@ def unseen(conn: sqlite3.Connection, jobs: Iterable[Job]) -> list[Job]:
 def mark_seen(conn: sqlite3.Connection, jobs: Iterable[Job]) -> int:
     now = datetime.now(timezone.utc).isoformat()
     rows = [
-        (job.url, job.id, job.title, job.company, job.source, fingerprint(job), now)
+        (
+            job.url,
+            job.id,
+            job.title,
+            job.company,
+            job.source,
+            fingerprint(job),
+            now,
+            job.location,
+            job.seniority,
+            job.work_mode,
+        )
         for job in jobs
         if job.url
     ]
     conn.executemany(
         """
         INSERT OR IGNORE INTO seen_jobs
-            (url, job_id, title, company, source, fingerprint, first_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (url, job_id, title, company, source, fingerprint, first_seen_at,
+             location, seniority, work_mode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )

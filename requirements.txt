@@ -1,3 +1,10 @@
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-python-dotenv>=1.0.0
+# No third-party runtime dependencies.
+#
+# Every source is reachable with stdlib urllib, and Pracuj.pl actively blocks
+# requests/urllib3 at the client-fingerprint level (403) while answering stdlib
+# urllib with 200 -- see fetchers/base.py. BeautifulSoup turned out to be
+# unnecessary too: all four sources embed their data as JSON in the page, so
+# there is no HTML tag soup to parse.
+#
+# Keeping this at zero deps means the GitHub Actions job needs no install step
+# and cannot break from an upstream package release.

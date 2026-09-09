@@ -1,0 +1,82 @@
+name: Job Radar
+
+on:
+  schedule:
+    # Every two hours. Times are UTC.
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "Adopt the current backlog as already seen, without sending anything"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Print messages to the log instead of sending them to Telegram"
+        type: boolean
+        default: false
+
+# One run at a time. cancel-in-progress is deliberately false: cancelling a run
+# after it has notified but before it has committed the database would resend
+# every one of those jobs on the next run.
+concurrency:
+  group: job-radar
+  cancel-in-progress: false
+
+permissions:
+  # Needed to commit the updated SQLite state back to the repo.
+  contents: write
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # No dependency cache or install step: the bot is stdlib-only.
+
+      - name: Run the radar
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          FLAGS=""
+          if [ "${{ inputs.seed }}" = "true" ]; then FLAGS="$FLAGS --seed"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
+          echo "running: python main.py $FLAGS"
+          python main.py $FLAGS
+
+      - name: Commit the updated state
+        # Runs even when the radar exited non-zero, because a delivery failure
+        # still leaves useful source statistics worth keeping.
+        if: always()
+        run: |
+          if [ -z "$(git status --porcelain seen_jobs.db)" ]; then
+            echo "state unchanged, nothing to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add seen_jobs.db
+
+          # [skip ci] keeps this bookkeeping commit from triggering workflows.
+          git commit -m "chore(state): update seen jobs [skip ci]"
+
+          # A human commit may have landed while this run was fetching, so
+          # rebase and retry rather than failing the run outright.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "state pushed on attempt $attempt"
+              exit 0
+            fi
+            echo "push rejected, rebasing and retrying"
+            git pull --rebase --autostash
+          done
+
+          echo "could not push state after 3 attempts"
+          exit 1

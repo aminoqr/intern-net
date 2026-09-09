@@ -35,6 +35,19 @@ def enabled_boards():
     return [b for b in ATS_BOARDS if b["enabled"] and b["slug"] and b["ats"]]
 
 
+# --- Keyword matching convention -----------------------------------------
+#
+# All keyword lists below are matched on text that has been lowercased and had
+# its Polish diacritics stripped (see models.normalize_text).
+#
+#   "junior"    -> whole-word match. Does NOT match "juniors" or "xjunior".
+#   "praktyk*"  -> prefix match. Matches "praktyki", "praktykant", "praktykanta".
+#
+# Whole-word is the default because plain substring matching is actively wrong
+# here: "intern" would match "International" and "Internal Auditor". The prefix
+# form exists for Polish, which inflects heavily ("staz", "stazu", "stazysta").
+
+
 # --- Seniority filtering --------------------------------------------------
 #
 # The behaviour being automated is "apply to basically everything entry-level",
@@ -42,29 +55,32 @@ def enabled_boards():
 # Pracuj.pl and NoFluffJobs both post in Polish.
 
 ENTRY_LEVEL_KEYWORDS = [
-    "intern",
+    "intern",  # deliberately not "intern*" -- that matches "international"
     "internship",
+    "interns",
     "trainee",
+    "trainees",
     "junior",
     "entry level",
     "entry-level",
     "graduate",
     "apprentice",
-    "praktykant",
-    "praktyki",
-    "praktyka",
-    "staz",  # matched after Polish diacritics are stripped ("staż")
-    "stazysta",
-    "mlodszy",  # "młodszy" = junior
-    "absolwent",
+    "apprenticeship",
+    "praktyk*",  # praktyki, praktykant, praktykanta
+    "staz*",  # staż, stażysta, stażu
+    "mlodsz*",  # młodszy, młodsza (= junior)
+    "absolwen*",  # absolwent (= graduate)
 ]
 
 # Titles containing these are rejected even if they also match an entry-level
 # keyword. Catches "Senior Engineer (Junior team)" and, more commonly,
 # "Junior/Mid/Senior" range postings that are really mid-level asks.
+#
+# "specjalista" is deliberately absent: it means "specialist", not "senior",
+# and would wrongly reject "Mlodszy Specjalista ds. IT".
 SENIOR_KEYWORDS = [
     "senior",
-    "sr.",
+    "sr",
     "staff",
     "principal",
     "lead",
@@ -75,9 +91,8 @@ SENIOR_KEYWORDS = [
     "architect",
     "expert",
     "chief",
-    "vp ",
-    "specjalista",
-    "starszy",
+    "vp",
+    "starsz*",  # starszy (= senior)
 ]
 
 # Structured seniority values as the sources themselves report them. Cheaper
@@ -95,11 +110,12 @@ REJECTED_SENIORITY = ["mid", "senior", "expert", "lead", "manager", "c-level", "
 ROLE_KEYWORDS = [
     "software",
     "developer",
-    "programator",
-    "programista",
+    "develop*",
+    "programist*",  # programista, programisty
     "programmer",
     "engineer",
-    "inzynier",
+    "engineering",
+    "inzynier*",  # inżynier, inżyniera
     "backend",
     "back-end",
     "frontend",
@@ -107,8 +123,6 @@ ROLE_KEYWORDS = [
     "fullstack",
     "full-stack",
     "full stack",
-    "web develop",
-    "mobile develop",
     "android",
     "ios",
     "python",
@@ -116,7 +130,7 @@ ROLE_KEYWORDS = [
     "javascript",
     "typescript",
     "golang",
-    " go ",
+    "go",
     "rust",
     "c++",
     "c#",
@@ -137,39 +151,53 @@ ROLE_KEYWORDS = [
     "data scientist",
     "machine learning",
     "deep learning",
-    " ai ",
-    "qa engineer",
-    "test engineer",
-    "automation engineer",
-    "security engineer",
+    "ai",
+    "ml",
+    "qa",
+    "tester",
+    "testing",
+    "automation",
+    "cybersecurity",
     "embedded",
-    "it support",
+    "it",
+    "web",
+    "mobile",
 ]
 
 # Explicitly non-engineering roles that sneak through on shared vocabulary
 # ("Junior Data Analyst", "Junior IT Recruiter", "Junior Project Manager").
 ROLE_EXCLUSIONS = [
-    "recruit",
-    "rekrutacj",
+    "recruit*",  # recruiter, recruitment
+    "rekrutacj*",
     "sales",
-    "sprzedaz",
+    "sprzedaz*",
     "marketing",
     "accountant",
-    "ksiegow",
-    "hr ",
+    "accounting",
+    "ksiegow*",  # księgowy (= accountant)
+    "hr",
     "people partner",
+    "talent",
     "customer support",
     "customer success",
+    "customer service",
     "content writer",
     "copywriter",
-    "graphic design",
+    "graphic design*",
     "project manager",
     "product owner",
     "scrum master",
     "business analyst",
+    "business development",
     "financial",
+    "finance",
     "payroll",
-    "recepcj",
+    "recepcj*",  # recepcja (= reception)
+    "outreach",
+    "consultant",
+    "consulting",
+    "aml",
+    "kyc",
 ]
 
 

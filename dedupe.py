@@ -14,7 +14,8 @@ scheduled runs. Two consequences of that design:
 - Journal mode is left at the default. WAL would create -wal/-shm sidecar files
   that the workflow would have to commit too, and a half-committed WAL is a
   corrupt database.
-- Writes are committed once at the end of a run, not per job.
+- mark_seen commits on every call. main.py marks each job right after its
+  Telegram message goes out, so a crash mid-delivery loses nothing.
 """
 
 from __future__ import annotations

@@ -4,8 +4,9 @@ Two ordering decisions in here are deliberate:
 
 - Each source is fetched inside its own try/except. One broken board must not
   take out the other five, and its failure becomes a fail-loud alert.
-- Jobs are notified *before* being marked as seen. If delivery fails, they stay
-  unseen and get retried next run rather than being silently dropped.
+- Each job is notified and *then* marked as seen, one at a time. If delivery
+  dies on job 7 of 20, jobs 1-6 are already recorded and only 7-20 are retried
+  next run -- nothing is dropped and nothing is double-sent.
 """
 
 from __future__ import annotations
@@ -90,13 +91,20 @@ def run(db_path: Optional[str] = None, seed: bool = False) -> int:
 
         exit_code = 0
         if fresh:
+            sent = 0
             try:
-                sent = notify.notify_jobs(fresh)
-                dedupe.mark_seen(conn, fresh)
-                log(f"sent {sent} message(s), marked {len(fresh)} jobs as seen")
+                for job in fresh:
+                    notify.notify_job(job)
+                    dedupe.mark_seen(conn, [job])
+                    sent += 1
+                log(f"sent {sent} job message(s), marked as seen")
             except notify.NotifyError as exc:
-                # Leave them unseen so the next run retries.
-                log(f"DELIVERY FAILED, jobs left unseen for retry: {exc}")
+                # Everything sent so far is already marked; the rest stays
+                # unseen and is retried next run.
+                log(
+                    f"DELIVERY FAILED after {sent}/{len(fresh)} messages, "
+                    f"the rest stay unseen for retry: {exc}"
+                )
                 exit_code = 1
         else:
             log("no new jobs")

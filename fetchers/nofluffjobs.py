@@ -10,12 +10,9 @@ probing the live API:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
-
 import config
 from fetchers.base import FetchError, fetch_json
-from models import Job
+from models import Job, iso_from_epoch_ms
 
 API_URL = "https://nofluffjobs.com/api/search/posting"
 JOB_URL_TEMPLATE = "https://nofluffjobs.com/pl/job/{slug}"
@@ -23,15 +20,6 @@ SOURCE = "nofluffjobs"
 
 # The trainee/junior + Warsaw slice is ~40 postings, so one page covers it.
 PAGE_LIMIT = 100
-
-
-def _iso_from_epoch_ms(value: Optional[int]) -> Optional[str]:
-    if not value:
-        return None
-    try:
-        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
-    except (TypeError, ValueError, OSError):
-        return None
 
 
 def _location(posting: dict) -> str:
@@ -58,7 +46,7 @@ def _to_job(posting: dict) -> Job:
         seniority=", ".join(seniority) if isinstance(seniority, list) else str(seniority),
         url=JOB_URL_TEMPLATE.format(slug=slug),
         source=SOURCE,
-        posted_at=_iso_from_epoch_ms(posting.get("posted")),
+        posted_at=iso_from_epoch_ms(posting.get("posted")),
     )
 
 

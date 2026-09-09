@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -43,3 +44,13 @@ def normalize_text(value: Optional[str]) -> str:
     # ł has no combining form, so NFKD leaves it intact.
     ascii_only = ascii_only.replace("ł", "l").replace("Ł", "L")
     return re.sub(r"\s+", " ", ascii_only).strip().lower()
+
+
+def iso_from_epoch_ms(value: Any) -> Optional[str]:
+    """Both NoFluffJobs and Lever report timestamps in epoch milliseconds."""
+    if not value:
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    except (TypeError, ValueError, OSError):
+        return None

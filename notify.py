@@ -131,6 +131,22 @@ def notify_jobs(jobs: Iterable[Job]) -> int:
     return len(messages)
 
 
+def notify_problems(problems: dict[str, str]) -> int:
+    """Send the fail-loud alert for suspect sources.
+
+    Sent as its own message rather than appended to the job list: the whole
+    point is that it is visible when there are no jobs to report.
+    """
+    if not problems:
+        return 0
+
+    lines = ["<b>Job Radar: a source might be broken</b>", ""]
+    for source, problem in sorted(problems.items()):
+        lines.append(f"<b>{html.escape(source)}</b>\n{html.escape(problem)}")
+    send_message("\n".join(lines))
+    return 1
+
+
 if __name__ == "__main__":
     sample = [
         Job(
@@ -154,3 +170,9 @@ if __name__ == "__main__":
     ]
     print(f"configured: {is_configured()}")
     print(f"messages sent: {notify_jobs(sample)}")
+    notify_problems(
+        {
+            "pracujpl": "returned 0 results (previously up to 197)",
+            "justjoinit": "fetch failed: HTTP 503",
+        }
+    )

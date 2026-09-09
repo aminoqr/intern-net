@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
     source        TEXT NOT NULL,
     first_seen_at TEXT NOT NULL
 );
+
+-- Per-run result counts, kept so the fail-loud check has a baseline to compare
+-- against. "Returned zero when it normally returns dozens" is unanswerable
+-- without history, and the runner's filesystem does not survive between runs.
+CREATE TABLE IF NOT EXISTS source_stats (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    source    TEXT NOT NULL,
+    run_at    TEXT NOT NULL,
+    job_count INTEGER NOT NULL,
+    ok        INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_source_stats_source ON source_stats(source, id);
 """
 
 # Legal forms carry no identity. "Mindbox Sp. z o.o." and "Mindbox" are one
@@ -164,6 +176,33 @@ def mark_seen(conn: sqlite3.Connection, jobs: Iterable[Job]) -> int:
 
 def count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM seen_jobs").fetchone()[0]
+
+
+def record_source_run(
+    conn: sqlite3.Connection, source: str, job_count: int, ok: bool = True
+) -> None:
+    """Log what a source returned this run, for the fail-loud baseline."""
+    conn.execute(
+        "INSERT INTO source_stats (source, run_at, job_count, ok) VALUES (?, ?, ?, ?)",
+        (source, datetime.now(timezone.utc).isoformat(), job_count, 1 if ok else 0),
+    )
+    conn.commit()
+
+
+def recent_counts(
+    conn: sqlite3.Connection, source: str, limit: int = 10
+) -> list[int]:
+    """Result counts from this source's last successful runs, newest first."""
+    rows = conn.execute(
+        """
+        SELECT job_count FROM source_stats
+        WHERE source = ? AND ok = 1
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (source, limit),
+    )
+    return [row["job_count"] for row in rows]
 
 
 if __name__ == "__main__":

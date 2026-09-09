@@ -1,0 +1,12 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# NOTE: seen_jobs.db is deliberately NOT ignored. The GitHub Actions workflow
+# commits it back after every run, which is the only way dedup state survives
+# between scheduled runs.

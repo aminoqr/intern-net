@@ -1,7 +1,11 @@
-"""Persistent seen-job store.
+"""Persistent seen-job store, two dedup layers deep.
 
-Layer one of two: per-URL. Once a link has been notified it is never notified
-again, which is what lets the bot run every hour without becoming noise.
+Layer one is per-URL: once a link has been notified it is never notified again,
+which is what lets the bot run every hour without becoming noise.
+
+Layer two is cross-source: company and title are normalized into a fingerprint,
+so one role cross-posted to NoFluffJobs and Pracuj.pl (or listed once per city
+on the same board) collapses into a single ping instead of three.
 
 State lives in a SQLite file that the GitHub Actions workflow commits back to
 the repo after each run, because the runner's filesystem is thrown away between
@@ -15,12 +19,13 @@ scheduled runs. Two consequences of that design:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 import config
-from models import Job
+from models import Job, normalize_text
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen_jobs (
@@ -33,6 +38,46 @@ CREATE TABLE IF NOT EXISTS seen_jobs (
 );
 """
 
+# Legal forms carry no identity. "Mindbox Sp. z o.o." and "Mindbox" are one
+# employer, and boards are inconsistent about including them.
+LEGAL_FORMS = re.compile(
+    r"(?<!\w)(sp\.?\s*z\s*o\.?\s*o\.?|spolka\s+z\s+ograniczona\s+odpowiedzialnoscia"
+    r"|spolka\s+akcyjna|s\.\s*a\.|z\s*o\.?\s*o\.?|gmbh|s\.?a\.?r\.?l\.?|ltd\.?"
+    r"|limited|llc|l\.l\.c\.|inc\.?|incorporated|plc|corp\.?|corporation"
+    r"|b\.?v\.?|n\.?v\.?|s\.?r\.?l\.?|oyj?|a\/s)(?!\w)"
+)
+
+# Polish job ads decorate titles for gender inclusivity in several formats:
+# "(K/M)", "(f/m)", "(m/f/d)", "Tester/-ka", "Analityk(czka)", "Programista/tka".
+GENDER_MARKERS = re.compile(
+    r"\(?(?<!\w)[kmf]\s*/\s*[kmfd](\s*/\s*[kmfd])?(?!\w)\)?"
+    r"|\(\s*(czka|ka|tka|ki)\s*\)"
+    r"|/\s*-?\s*(czka|tka|ka|ki)(?!\w)"
+)
+
+NON_ALNUM = re.compile(r"[^a-z0-9]+")
+
+
+def company_key(company: str) -> str:
+    text = normalize_text(company)
+    text = re.sub(r"\([^)]*\)", " ", text)  # "AVENGA (Agencja Pracy, nr KRAZ: 8448)"
+    text = LEGAL_FORMS.sub(" ", text)
+    return NON_ALNUM.sub(" ", text).strip()
+
+
+def title_key(title: str) -> str:
+    text = normalize_text(title)
+    text = GENDER_MARKERS.sub(" ", text)
+    return NON_ALNUM.sub(" ", text).strip()
+
+
+def make_fingerprint(company: str, title: str) -> str:
+    return f"{company_key(company)}|{title_key(title)}"
+
+
+def fingerprint(job: Job) -> str:
+    return make_fingerprint(job.company, job.title)
+
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Bring an existing database up to the current schema.
@@ -41,6 +86,27 @@ def _migrate(conn: sqlite3.Connection) -> None:
     keeps working instead of crashing the run.
     """
     conn.executescript(SCHEMA)
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(seen_jobs)")}
+    if "fingerprint" not in columns:
+        conn.execute(
+            "ALTER TABLE seen_jobs ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''"
+        )
+        # Backfill from the titles and companies already stored, so upgrading
+        # does not resurface every job we have ever seen.
+        backfill = [
+            (make_fingerprint(row["company"], row["title"]), row["url"])
+            for row in conn.execute("SELECT url, title, company FROM seen_jobs")
+        ]
+        conn.executemany(
+            "UPDATE seen_jobs SET fingerprint = ? WHERE url = ?", backfill
+        )
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_seen_jobs_fingerprint "
+        "ON seen_jobs(fingerprint)"
+    )
+    conn.commit()
 
 
 def connect(path: Optional[str] = None) -> sqlite3.Connection:
@@ -51,29 +117,44 @@ def connect(path: Optional[str] = None) -> sqlite3.Connection:
 
 
 def unseen(conn: sqlite3.Connection, jobs: Iterable[Job]) -> list[Job]:
-    """The jobs whose URLs are not already in the store."""
-    known = {row["url"] for row in conn.execute("SELECT url FROM seen_jobs")}
+    """The jobs that are new by URL *and* by company+title fingerprint.
+
+    Both sets are also updated as we go, so duplicates appearing twice within a
+    single run collapse too -- which happens in practice, since boards list one
+    role once per city.
+    """
+    known_urls = {row["url"] for row in conn.execute("SELECT url FROM seen_jobs")}
+    known_prints = {
+        row["fingerprint"]
+        for row in conn.execute("SELECT fingerprint FROM seen_jobs")
+        if row["fingerprint"]
+    }
+
     fresh = []
     for job in jobs:
-        if job.url and job.url not in known:
-            fresh.append(job)
-            # Guard against the same URL appearing twice within one run.
-            known.add(job.url)
+        if not job.url or job.url in known_urls:
+            continue
+        print_ = fingerprint(job)
+        if print_ in known_prints:
+            continue
+        fresh.append(job)
+        known_urls.add(job.url)
+        known_prints.add(print_)
     return fresh
 
 
 def mark_seen(conn: sqlite3.Connection, jobs: Iterable[Job]) -> int:
     now = datetime.now(timezone.utc).isoformat()
     rows = [
-        (job.url, job.id, job.title, job.company, job.source, now)
+        (job.url, job.id, job.title, job.company, job.source, fingerprint(job), now)
         for job in jobs
         if job.url
     ]
     conn.executemany(
         """
         INSERT OR IGNORE INTO seen_jobs
-            (url, job_id, title, company, source, first_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (url, job_id, title, company, source, fingerprint, first_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -97,12 +178,27 @@ if __name__ == "__main__":
         jobs.extend(fetch_fn())
     jobs = filter_jobs(jobs)
 
+    print("fingerprint normalization:")
+    for company, title in [
+        ("Falck Digital Technology Poland Sp. z o.o.", "Working Student – IT Support"),
+        ("Falck Digital Technology Poland", "Working Student - IT Support"),
+        ("Connectis_", "Analityk(czka) AML/KYC"),
+        ("AVENGA (Agencja Pracy, nr KRAZ: 8448)", "Junior IT Analyst"),
+        ("Mindbox Sp. z o.o.", "Tester/ -ka Oprogramowania _ Junior"),
+        ("PracBaza", "Junior Programista/tka Helpdesk k/m"),
+    ]:
+        print(f"  {company!r:48} {title!r:40} -> {make_fingerprint(company, title)!r}")
+
     # A throwaway database, so the smoke test never marks the real one as seen.
     with tempfile.TemporaryDirectory() as tmp:
         db = connect(str(Path(tmp) / "smoke.db"))
         first = unseen(db, jobs)
         mark_seen(db, first)
-        print(f"run 1: {len(jobs)} filtered -> {len(first)} new (stored {count(db)})")
+        collapsed = len(jobs) - len(first)
+        print(
+            f"\nrun 1: {len(jobs)} filtered -> {len(first)} new "
+            f"({collapsed} collapsed cross-source), stored {count(db)}"
+        )
         second = unseen(db, jobs)
         print(f"run 2: same input -> {len(second)} new (expected 0)")
         db.close()

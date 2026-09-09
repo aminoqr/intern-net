@@ -16,12 +16,12 @@ ATS_BOARDS = [
     {"company": "Nord Security / Saily", "ats": "ashby", "slug": "nord-security", "enabled": True},
     {"company": "Snowflake", "ats": "ashby", "slug": "snowflake", "enabled": True},
     {"company": "Point72", "ats": "greenhouse", "slug": "point72", "enabled": True},
+    {"company": "Starburst", "ats": "greenhouse", "slug": "starburst", "enabled": True},
+    {"company": "Box", "ats": "greenhouse", "slug": "boxinc", "enabled": True},
     # Unverified. Careers pages are JS-rendered or header-blocked, so the board
     # slug could not be read off them. Confirm from the live careers page (look
     # for a boards.greenhouse.io / jobs.ashbyhq.com / jobs.lever.co link) and
     # flip enabled to True.
-    {"company": "Starburst", "ats": "ashby", "slug": None, "enabled": False},
-    {"company": "Box", "ats": None, "slug": None, "enabled": False},
     {"company": "Visa", "ats": None, "slug": None, "enabled": False},
     {"company": "ING Hubs Poland", "ats": None, "slug": None, "enabled": False},
     # Accenture runs Workday, which the generic ATS fetcher does not support.
@@ -94,6 +94,15 @@ SENIOR_KEYWORDS = [
     "vp",
     "starsz*",  # starszy (= senior)
 ]
+
+# Mid-level markers. Unlike SENIOR_KEYWORDS these are not an outright veto:
+# "Junior/Mid Java Developer" is worth applying to, "Mid .Net Engineer" is not.
+# So these only reject when the title carries no entry-level keyword of its own.
+#
+# Roman numerals are here because Pracuj.pl and Just Join IT both tag
+# "Performance Engineer II" as junior in their structured data, and level II is
+# consistently a mid-level ask.
+MID_LEVEL_KEYWORDS = ["mid", "regular", "ii", "iii"]
 
 # Structured seniority values as the sources themselves report them. Cheaper
 # and more reliable than title matching when a source provides it.
@@ -189,6 +198,16 @@ ROLE_EXCLUSIONS = [
     "scrum master",
     "business analyst",
     "business development",
+    "business operations",
+    "analityk biznesowy",
+    # HR and workforce systems roles that match on shared IT vocabulary.
+    "hris",
+    "workforce",
+    "coordinator",
+    # IT project/contract administration, not engineering.
+    "project specialist",
+    "projektow",  # "ds. Projektów IT"
+    "umowami",  # "ds. Zarządzania Umowami IT"
     "financial",
     "finance",
     "payroll",
@@ -203,20 +222,119 @@ ROLE_EXCLUSIONS = [
 
 # --- Location filtering --------------------------------------------------
 #
-# Warsaw first, plus remote roles anywhere in Poland.
+# Warsaw first, plus remote roles in Poland.
 
-ACCEPTED_LOCATIONS = [
+POLISH_LOCATIONS = [
     "warszawa",
     "warsaw",
     "mazowieckie",
     "masovian",
+    "poland",
+    "polska",
+    "pl",
+]
+
+REMOTE_LOCATIONS = [
     "remote",
     "zdalnie",
     "zdalna",
     "praca zdalna",
-    "poland",
-    "polska",
-    "pl",
+]
+
+ACCEPTED_LOCATIONS = POLISH_LOCATIONS + REMOTE_LOCATIONS
+
+# Foreign locations reject a posting even when it is also marked remote, since
+# "Vilnius, Remote" is a Lithuanian role. A Polish location anywhere in the
+# same field overrides this, so "Warszawa, Vilnius, Remote" still matches.
+#
+# Deliberately does NOT contain "praga": Praga-Polnoc and Praga-Poludnie are
+# Warsaw districts and appear in real postings. Prague is listed in English
+# only. Foreign locations are mostly caught by the country-prefix rule in
+# filter.py (Snowflake formats locations as "US-CA-Menlo Park"), so this list
+# only needs to cover bare foreign city names.
+REJECTED_LOCATIONS = [
+    "vilnius",
+    "kaunas",
+    "klaipeda",
+    "riga",
+    "tallinn",
+    "wegry",  # "Węgry" = Hungary
+    "hungary",
+    "budapest",
+    "prague",
+    "praha",
+    "brno",
+    "bratislava",
+    "london",
+    "manchester",
+    "berlin",
+    "munich",
+    "hamburg",
+    "frankfurt",
+    "madrid",
+    "barcelona",
+    "lisbon",
+    "porto",
+    "amsterdam",
+    "dublin",
+    "paris",
+    "vienna",
+    "zurich",
+    "geneva",
+    "brussels",
+    "stockholm",
+    "oslo",
+    "copenhagen",
+    "helsinki",
+    "milan",
+    "rome",
+    "athens",
+    "bucharest",
+    "sofia",
+    "belgrade",
+    "zagreb",
+    "kyiv",
+    "kiev",
+    "lviv",
+    "istanbul",
+    "tel aviv",
+    "dubai",
+    "bangalore",
+    "bengaluru",
+    "hyderabad",
+    "pune",
+    "mumbai",
+    "chennai",
+    "noida",
+    "gurgaon",
+    "singapore",
+    "tokyo",
+    "seoul",
+    "shanghai",
+    "beijing",
+    "sydney",
+    "melbourne",
+    "toronto",
+    "vancouver",
+    "new york",
+    "san francisco",
+    "san jose",
+    "san mateo",
+    "menlo park",
+    "mountain view",
+    "bellevue",
+    "redmond",
+    "seattle",
+    "austin",
+    "chicago",
+    "boston",
+    "atlanta",
+    "denver",
+    "dallas",
+    "houston",
+    "los angeles",
+    "sao paulo",
+    "mexico city",
 ]
 
 # Set False to accept postings whose location could not be determined, rather
@@ -248,7 +366,9 @@ REQUEST_TIMEOUT = 30
 MAX_RETRIES = 3
 
 # Fail-loud: alert when a source returns fewer than this fraction of its
-# trailing median result count.
-SOURCE_DROP_THRESHOLD = 0.25
+# trailing median result count. Live counts per source sit between 23 and 369
+# and are stable run to run, so 0.4 catches a real breakage well before it
+# looks like a quiet day, without firing on normal churn.
+SOURCE_DROP_THRESHOLD = 0.4
 # Ignore the threshold until we have this many historical runs to compare to.
 SOURCE_HISTORY_MIN_RUNS = 3

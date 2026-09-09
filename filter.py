@@ -40,11 +40,19 @@ def _compile_all(keywords: list[str]) -> list[re.Pattern]:
 
 ENTRY_LEVEL = _compile_all(config.ENTRY_LEVEL_KEYWORDS)
 SENIOR = _compile_all(config.SENIOR_KEYWORDS)
+MID_LEVEL = _compile_all(config.MID_LEVEL_KEYWORDS)
 ROLE = _compile_all(config.ROLE_KEYWORDS)
 ROLE_EXCLUDED = _compile_all(config.ROLE_EXCLUSIONS)
 SENIORITY_OK = _compile_all(config.ACCEPTED_SENIORITY)
 SENIORITY_BAD = _compile_all(config.REJECTED_SENIORITY)
-LOCATIONS = _compile_all(config.ACCEPTED_LOCATIONS)
+POLISH = _compile_all(config.POLISH_LOCATIONS)
+REMOTE = _compile_all(config.REMOTE_LOCATIONS)
+FOREIGN = _compile_all(config.REJECTED_LOCATIONS)
+
+# Snowflake and other large ATS boards prefix locations with a country code,
+# e.g. "US-CA-Menlo Park" or "PL-Warsaw-Lixa C". Anything that is not PL is
+# foreign, which generalizes better than listing every city on earth.
+COUNTRY_PREFIX = re.compile(r"^([a-z]{2})-")
 
 
 def _hit(patterns: list[re.Pattern], text: str) -> Optional[str]:
@@ -53,6 +61,18 @@ def _hit(patterns: list[re.Pattern], text: str) -> Optional[str]:
         match = pattern.search(text)
         if match:
             return match.group(0)
+    return None
+
+
+def _foreign_marker(location: str) -> Optional[str]:
+    """A sign this posting is based outside Poland, or None."""
+    named = _hit(FOREIGN, location)
+    if named:
+        return named
+    for part in location.split(","):
+        prefix = COUNTRY_PREFIX.match(part.strip())
+        if prefix and prefix.group(1) != "pl":
+            return prefix.group(0)
     return None
 
 
@@ -90,10 +110,22 @@ def rejection_reason(job: Job) -> Optional[str]:
         # "Mid, Senior" -> drop. "Junior, Mid" -> keep, still worth applying to.
         return f"seniority: source says {job.seniority!r}"
 
+    mid_marker = _hit(MID_LEVEL, title)
+    if mid_marker and not entry_in_title:
+        # "Mid .Net Engineer" and "Performance Engineer II" get tagged junior by
+        # the boards, so the title has the final say when it says otherwise.
+        return f"seniority: title says {mid_marker!r} with no entry-level marker"
+
     # 3. Location gate.
     if not location:
         return None if config.ALLOW_UNKNOWN_LOCATION else "location: unknown"
-    if not _hit(LOCATIONS, location):
+
+    in_poland = _hit(POLISH, location)
+    foreign = _foreign_marker(location)
+    if foreign and not in_poland:
+        # Remote does not rescue this: "Vilnius, Remote" is a Lithuanian role.
+        return f"location: {job.location!r} is outside Poland ({foreign!r})"
+    if not (in_poland or _hit(REMOTE, location)):
         return f"location: {job.location!r} out of scope"
 
     return None

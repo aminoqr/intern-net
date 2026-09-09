@@ -17,16 +17,17 @@ scraping service, no API keys.
 | Source | Method | Status |
 |---|---|---|
 | NoFluffJobs | Public JSON search API | Verified, ~39 Warsaw trainee/junior postings |
-| Target company ATS boards | Greenhouse / Ashby / Lever public board APIs | Verified for 3 boards, ~730 postings |
-| Pracuj.pl | React Query cache embedded in `__NEXT_DATA__` | Verified, ~197 postings |
+| Target company ATS boards | Greenhouse / Ashby / Lever public board APIs | Verified for 5 boards, ~900 postings |
+| Pracuj.pl | React Query cache embedded in `__NEXT_DATA__` | Verified, ~198 postings |
 | Just Join IT | Offer array embedded in the streamed RSC payload | Verified, ~311 postings |
 
 Target company boards currently enabled: Nord Security / Saily (`ashby:nord-security`),
-Snowflake (`ashby:snowflake`), Point72 (`greenhouse:point72`). Starburst, Box, Visa,
-ING Hubs Poland and Accenture are listed but disabled in [config.py](config.py) because their
-board slugs could not be confirmed from their careers pages, and Accenture runs Workday, which
-the generic ATS fetcher does not support. A wrong slug is a 404, which would fire a false
-alert on every run, so unconfirmed boards stay off rather than guessed at.
+Snowflake (`ashby:snowflake`), Point72 (`greenhouse:point72`), Starburst
+(`greenhouse:starburst`) and Box (`greenhouse:boxinc`). Visa and ING Hubs Poland are listed
+but disabled in [config.py](config.py) because their board slugs could not be confirmed from
+their careers pages, and Accenture is disabled because it runs Workday, which the generic ATS
+fetcher does not support. A wrong slug is a 404, which would fire a false alert on every run,
+so unconfirmed boards stay off rather than guessed at.
 
 ## Quick start
 
@@ -41,7 +42,7 @@ python main.py --dry-run
 ```
 
 On a fresh database the first real run would send every currently-matching posting, which is
-roughly 150 messages' worth of backlog. To start from "only tell me about new things":
+around 130 jobs' worth of backlog. To start from "only tell me about new things":
 
 ```bash
 python main.py --seed     # adopt the current backlog silently
@@ -81,14 +82,14 @@ repo, because an Actions runner's filesystem does not survive between scheduled 
 
 ```
 fetchers/*  ->  filter.py  ->  dedupe.py  ->  notify.py
-  6 sources     3 gates       2 layers      Telegram
+  8 sources     3 gates       2 layers      Telegram
 
-  1278 fetched -> 200 matched -> 150 new -> 12 messages
+  1450 fetched -> 187 matched -> 137 new -> 11 messages
 ```
 
 Every fetcher returns the same normalized `Job` record, so `main.py` never knows where a
-posting came from. A representative run: 1278 postings fetched, 200 pass the filters, 150 are
-new after deduplication.
+posting came from. A representative run: 1450 postings fetched across eight sources, 187 pass
+the filters, 137 are new after deduplication, delivered as 11 batched messages.
 
 ### Filtering
 
@@ -99,8 +100,11 @@ match the same keyword lists:
    junior accountants, recruiters and marketing specialists.
 2. **Seniority** — entry-level, and not secretly a mid or senior ask. A senior marker in the
    title always wins, so `Junior/Mid/Senior` range postings are dropped while `Junior-Mid` is
-   kept.
-3. **Location** — Warsaw, or remote.
+   kept. Mid markers are softer: `Mid .Net Engineer` and `Performance Engineer II` are dropped
+   because the boards tag them junior in their structured data while the title says otherwise.
+3. **Location** — Warsaw, or remote within Poland. Being remote does not rescue a foreign
+   posting, since `Vilnius, Remote` is a Lithuanian role. Locations prefixed with a country
+   code other than `PL` are treated as foreign, which covers the large ATS boards generically.
 
 Matching is whole-word by default, not substring, because substring matching is wrong in ways
 that matter here: `intern` appears inside "International" and "Internal Auditor". Keywords
@@ -115,12 +119,12 @@ Two layers, both in [dedupe.py](dedupe.py):
 - **Per company and title fingerprint.** Legal forms (`Sp. z o.o.`, `GmbH`, `Ltd`) and Polish
   gender markers (`(K/M)`, `(czka)`, `/-ka`) are stripped before comparing, so one role
   cross-posted to two boards, or listed once per city on one board, collapses into a single
-  ping. This removed 50 duplicate notifications out of 200 matches on a live run.
+  ping. This removed 50 duplicate notifications out of 187 matches on a live run.
 
 ### Fail-loud alerting
 
 Every run records each source's result count in a `source_stats` table. A source is reported
-as suspect when it raises, returns zero having previously returned more, or drops below 25%
+as suspect when it raises, returns zero having previously returned more, or drops below 40%
 of its trailing median. That alert is sent as its own message, precisely because the failure
 mode being guarded against is an absence of messages.
 
@@ -208,7 +212,16 @@ walked through its full range — first run, healthy runs, collapse, zero, excep
 to confirm it neither cries wolf nor stays quiet when it matters. Failure isolation was tested
 by injecting a raising fetcher and confirming the other sources still delivered.
 
-**Known rough edges**, kept honest rather than hidden: the filters are tuned to over-include,
-since a missed internship costs more than a junk notification. Pracuj.pl and Just Join IT both
-tag "Junior/Mid/Senior talent pool" postings as junior, and some slip through. The location
-gate accepts any remote posting, including remote roles based outside Poland.
+**The last commit is the tuning pass**, done by reading a full live run's output rather than
+by guessing. It removed non-engineering roles that matched on shared vocabulary (`AI Business
+Operations Specialist`, `HRIS Analyst`, `Junior IT HelpDesk and Travel Coordinator`), added
+the mid-level title rule, and tightened the location gate against foreign remote roles. That
+pass is also what caught a bug worth keeping in mind: a naive list of foreign cities would
+include Prague, and `Praga-Polnoc` and `Praga-Poludnie` are Warsaw districts that appear in
+real postings. Two further company boards, Starburst and Box, were confirmed and enabled at
+the same time.
+
+**Known rough edges**, kept honest rather than hidden: the filters still lean towards
+over-including, since a missed internship costs more than a junk notification. IT support and
+helpdesk roles are kept deliberately, as they are plausible entry points. Visa and ING Hubs
+Poland remain unconfirmed, and Accenture's Workday board is out of scope.
